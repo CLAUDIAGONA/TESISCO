@@ -1,0 +1,50 @@
+STAR --runThreadN 8 \
+     --genomeDir /home/claudiao/tesis/star_index \
+     --readFilesIn /home/claudiao/tesis/CC.T_1.fq.gz /home/claudiao/tesis/CC.T_2.fq.gz \
+     --readFilesCommand zcat \
+     --outFileNamePrefix /home/claudiao/tesis/star_output/ \
+     --outSAMtype BAM SortedByCoordinate \
+     --outFilterMultimapNmax 50 \
+     --winAnchorMultimapNmax 50 \
+     --outFilterScoreMinOverLread 0.5 \
+     --outFilterMatchNminOverLread 0.5 \
+     --alignIntronMax 50000 \
+     --alignMatesGapMax 50000 \
+     --seedSearchStartLmax 50 \
+     --outSAMattrRGline ID:Sample1 SM:Sample1 LB:Library1 PL:ILLUMINA \
+     --outSAMmapqUnique 60 \
+     --outFilterMismatchNmax 10 \
+     --outFilterMismatchNoverLmax 0.1 \
+     --limitBAMsortRAM 28000000000 \
+     --limitOutSJcollapsed 5000000
+
+
+samtools stats /home/claudiao/tesis/star_output/Aligned.sortedByCoord.out.bam > /home/claudiao/tesis/star_output/alignment_stats.txt
+
+plot-bamstats -p /home/claudiao/tesis/star_output/alignment_plots/ /home/claudiao/tesis/star_output/alignment_stats.txt
+
+featureCounts \
+  -a /home/claudiao/tesis/Gpan_WG.gtf \
+  -o /home/claudiao/tesis/featurecounts_matrix.txt \
+  -Q 1 \
+  -T 8 \
+  -t exon \
+  -g gene_id \
+  -p \
+  -B \
+  -C \
+  /home/claudiao/tesis/star_output/AA.P.bam \
+  /home/claudiao/tesis/star_output/AA.S.bam \
+  /home/claudiao/tesis/star_output/AA.T.bam \
+  /home/claudiao/tesis/star_output/AC.P.bam \
+  /home/claudiao/tesis/star_output/AC.S.bam \
+  /home/claudiao/tesis/star_output/AC.T.bam \
+  /home/claudiao/tesis/star_output/CA.P.bam \
+  /home/claudiao/tesis/star_output/CA.S.bam \
+  /home/claudiao/tesis/star_output/CA.T.bam \
+  /home/claudiao/tesis/star_output/CC.P.bam \
+  /home/claudiao/tesis/star_output/CC.S.bam \
+  /home/claudiao/tesis/star_output/CC.T.bam
+  
+  
+  #SE TRANSFORMÓ EN GALAXY EL GFF A GTF
