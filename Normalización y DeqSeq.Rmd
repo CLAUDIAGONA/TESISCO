@@ -1,0 +1,561 @@
+---
+title: "TESIS"
+author: "Claudia Oña"
+date: "2025-02-20"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#CARGAR PAQUETES
+```{r}
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+library(DESeq2)
+library(dplyr)
+library(tidyverse)
+```
+
+
+# Crear el diseño experimental (metadata)
+
+```{r}
+sampleInfo <- data.frame(
+  Sample = c("AB.P", "AB.S", "AB.T",
+             "AF.P", "AF.S", "AF.T",
+             "CB.P", "CB.S", "CB.T",
+             "CF.P", "CF.S", "CF.T"),
+  Variety = c("A", "A", "A", 
+              "A", "A", "A", 
+              "C", "C", "C", 
+              "C", "C", "C"),
+  State = c("B", "B", "B", 
+            "F", "F", "F", 
+            "B", "B", "B", 
+            "F", "F", "F"),
+  Replicate = c("P", "S", "T", 
+                "P", "S", "T", 
+                "P", "S", "T", 
+                "P", "S", "T")
+)
+print(sampleInfo)
+```
+
+# Cargar la matriz de conteos
+
+```{r}
+countdata <- as.data.frame(readxl::read_excel("/Users/DELL/Documents/TESIS/featurecounts_matrix.xlsx"))
+rownames(countdata) <- countdata[[1]]
+countdata <- countdata[ , -1]
+
+
+```
+
+# Crear el objeto DESeq2 tomando en cuenta el diseño experimental
+
+```{r}
+sampleInfo$State <- factor(sampleInfo$State, levels = c("B", "F"))
+sampleInfo$Variety <- factor(sampleInfo$Variety, levels = c("A", "C"))
+
+dds <- DESeqDataSetFromMatrix(
+  countData = countdata,  # Matriz de conteos
+  colData = sampleInfo,   # Metadata actualizada
+  design = ~ Replicate + Variety + State + Variety:State
+)
+```
+
+# Nos quedamos con los genes que tengan un conteo mayor a 1
+
+```{r}
+
+dds <- dds[rowSums(counts(dds)) > 1, ]
+```
+
+# Normalizamos entre muestras para poder hacer la comparacion
+
+```{r}
+vsd = vst(dds, blind = F)
+```
+
+# PCA con porcentajes
+
+```{r}
+pcaData <- plotPCA(vsd, intgroup = c("Variety", "State", "Replicate"), returnData = TRUE)
+```
+
+#PCA CON ESTADO FENOLÓGICO
+
+```{r}
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+```
+
+```{r}
+pcaS = ggplot(pcaData, aes(PC1, PC2)) + geom_point(aes(color = State, shape = State),
+    size = 6, alpha = 0.5) + xlab(paste0("PC1: ", percentVar[1], "% de varianza")) +
+    ylab(paste0("PC2: ", percentVar[2], "% de varianza")) + scale_color_manual(values = c("blue",
+    "red")) + coord_fixed() + theme_bw() + labs(title = "PCA of sequenced samples")
+pcaS
+```
+
+#PCA CON VARIEDAD
+
+```{r}
+pcaV = ggplot(pcaData, aes(PC1, PC2)) + geom_point(aes(color = Variety, shape = Variety),
+    size = 6, alpha = 0.5) + xlab(paste0("PC1: ", percentVar[1], "% de varianza")) +
+    ylab(paste0("PC2: ", percentVar[2], "% de varianza")) + scale_color_manual(values = c("blue",
+    "red")) + coord_fixed() + theme_bw() + labs(title = "PCA of sequenced samples")
+pcaV
+```
+
+#Análisis de expresión diferencial
+
+```{r}
+dds <- DESeq(dds)
+```
+
+#transformar matriz en dataframe
+
+```{r}
+y = as.data.frame(counts(dds))
+```
+
+# Creamos una tabla tidy
+
+```{r}
+
+tabla_tidy <- y %>%
+  rownames_to_column(var = "Name") %>%
+  pivot_longer(
+    cols = -Name,                     # todas las columnas excepto la columna de nombres
+    names_to = "Sample",              # guardamos el nombre original de la muestra
+    values_to = "tpms"
+  ) %>%
+  mutate(
+    Variety = substr(Sample, 1, 1),     # primer carácter (A o C)
+    State   = substr(Sample, 2, 2),     # segundo carácter (B o )
+    Replicate = substr(Sample, 4, 4)    # cuarto carácter (P, S o T)
+  ) %>%
+  mutate(logtpms = log10(tpms))
+
+
+
+```
+
+#Gráfico PARA VER LA CORRECTA NORMALIZACIÓN
+
+```{r}
+ggboxplot(tabla_tidy, x = "Replicate", y = "logtpms", 
+          color = "Sample", 
+          palette = c("#00AFBB", "#E7B800", "#FC4E07", "#7E57C2", "#3F51B5", 
+                      "#BAE1FF", "#E63946", "#F4A261", "#2A9D8F", "#264653", 
+                      "#E76F51", "#33FF57"))
+
+```
+
+#VER LOS NOMBRES DE DES
+
+```{r}
+resultsNames(dds)
+```
+
+# Comparar Variety A en State B vs Variety A in State F
+
+```{r}
+res_A_B_vs_A_F <- results(dds, name = "State_F_vs_B")
+```
+
+# Comparar Variety C en State B vs Variety C en State F
+
+```{r}
+res_C_B_vs_C_F <- results(dds, contrast = list("State_F_vs_B", "VarietyC.StateF"))
+```
+
+# Comparar Variety A vs Variety C en State F
+
+```{r}
+res_A_F_vs_C_F <- results(dds, contrast = list("Variety_C_vs_A", "VarietyC.StateF"))
+```
+
+# Comparar Variety A vs Variety C en State B
+
+```{r}
+res_A_B_vs_C_B <- results(dds, name = "Variety_C_vs_A")
+```
+
+# Convertir en Dta Frame los resultados
+
+```{r}
+Res_A_B_vs_A_F = as.data.frame(res_A_B_vs_A_F)
+Res_C_B_vs_C_F = as.data.frame(res_C_B_vs_C_F)
+Res_A_F_vs_C_F = as.data.frame(res_A_F_vs_C_F)
+Res_A_B_vs_C_B = as.data.frame(res_A_B_vs_C_B)
+```
+
+# log2fc y pvalorajustado para tomar decisiones
+
+```{r}
+Res_A_B_vs_A_F["Result"] = as.factor(ifelse(Res_A_B_vs_A_F$padj < 0.05, ifelse(abs(Res_A_B_vs_A_F$log2FoldChange) >
+    1, ifelse(Res_A_B_vs_A_F$log2FoldChange > 0, "Up Regulated", "Down Regulated"), "Not Significative"),
+    "Not Altered"))
+
+Res_C_B_vs_C_F["Result"] = as.factor(ifelse(Res_C_B_vs_C_F$padj < 0.05, ifelse(abs(Res_C_B_vs_C_F$log2FoldChange) >
+    1, ifelse(Res_C_B_vs_C_F$log2FoldChange > 0, "Up Regulated", "Down Regulated"), "Not Significative"),
+    "Not Altered"))
+
+
+Res_A_F_vs_C_F["Result"] = as.factor(ifelse(Res_A_F_vs_C_F$padj < 0.05, ifelse(abs(Res_A_F_vs_C_F$log2FoldChange) >
+    1, ifelse(Res_A_F_vs_C_F$log2FoldChange > 0, "Up Regulated", "Down Regulated"), "Not Significative"),
+    "Not Altered"))
+
+Res_A_B_vs_C_B["Result"] = as.factor(ifelse(Res_A_B_vs_C_B$padj < 0.05, ifelse(abs(Res_A_B_vs_C_B$log2FoldChange) >
+    1, ifelse(Res_A_B_vs_C_B$log2FoldChange > 0, "Up Regulated", "Down Regulated"), "Not Significative"),
+    "Not Altered"))
+
+```
+
+# Eliminar los NA
+
+```{r}
+Res_A_B_vs_A_F = Res_A_B_vs_A_F[complete.cases(Res_A_B_vs_A_F$Result), ]
+
+Res_C_B_vs_C_F = Res_C_B_vs_C_F[complete.cases(Res_C_B_vs_C_F$Result), ]
+
+Res_A_F_vs_C_F = Res_A_F_vs_C_F[complete.cases(Res_A_F_vs_C_F$Result), ]
+
+Res_A_B_vs_C_B = Res_A_B_vs_C_B[complete.cases(Res_A_B_vs_C_B$Result), ]
+
+```
+# Generar tablas de resultados
+
+```{r}
+Res_A_B_vs_A_F %>%
+    group_by(Result) %>%
+    summarise(conteo = n(), mean_log2FC = round(mean(log2FoldChange), digits = 3),
+        sd_log2FC = round(sd(log2FoldChange), digits = 3))
+
+
+Res_C_B_vs_C_F %>%
+    group_by(Result) %>%
+    summarise(conteo = n(), mean_log2FC = round(mean(log2FoldChange), digits = 3),
+        sd_log2FC = round(sd(log2FoldChange), digits = 3))
+
+
+Res_A_F_vs_C_F %>%
+    group_by(Result) %>%
+    summarise(conteo = n(), mean_log2FC = round(mean(log2FoldChange), digits = 3),
+        sd_log2FC = round(sd(log2FoldChange), digits = 3))
+
+
+Res_A_B_vs_C_B %>%
+    group_by(Result) %>%
+    summarise(conteo = n(), mean_log2FC = round(mean(log2FoldChange), digits = 3),
+        sd_log2FC = round(sd(log2FoldChange), digits = 3))
+
+```
+#Mostrar solo los genes up y down
+```{r}
+# 1. Convertir nombres de filas a columna geneID
+Res_A_B_vs_A_F <- Res_A_B_vs_A_F %>% rownames_to_column(var = "geneID")
+Res_C_B_vs_C_F <- Res_C_B_vs_C_F %>% rownames_to_column(var = "geneID")
+Res_A_F_vs_C_F <- Res_A_F_vs_C_F %>% rownames_to_column(var = "geneID")
+Res_A_B_vs_C_B <- Res_A_B_vs_C_B %>% rownames_to_column(var = "geneID")
+
+# 2. Crear lista de comparaciones
+comparaciones <- list(
+  "A_B_vs_A_F" = Res_A_B_vs_A_F,
+  "C_B_vs_C_F" = Res_C_B_vs_C_F,
+  "A_F_vs_C_F" = Res_A_F_vs_C_F,
+  "A_B_vs_C_B" = Res_A_B_vs_C_B
+)
+
+# 3. Función para procesar y combinar resultados up y down
+procesar_DE_combinado <- function(df, nombre) {
+  # Filtrar solo genes significativos (up y down)
+  df_filtrado <- df %>%
+    filter(Result %in% c("Up Regulated", "Down Regulated")) %>%
+    select(geneID, log2FoldChange, padj, Result) %>%
+    mutate(Comparacion = nombre)
+  
+  # Ordenar por mayor magnitud de cambio (absoluto de log2FC)
+  df_filtrado <- df_filtrado %>%
+    arrange(desc(abs(log2FoldChange)))
+  
+  # Guardar tabla combinada
+  assign(paste0(nombre, "_DE"), df_filtrado, envir = .GlobalEnv)
+  
+  # Retornar resumen estadístico
+  list(
+    Comparación = nombre,
+    Up_Regulated = sum(df_filtrado$Result == "Up Regulated"),
+    Down_Regulated = sum(df_filtrado$Result == "Down Regulated"),
+    Top_Up_Gene = df_filtrado %>% filter(Result == "Up Regulated") %>% slice(1) %>% pull(geneID),
+    Top_Down_Gene = df_filtrado %>% filter(Result == "Down Regulated") %>% slice(1) %>% pull(geneID)
+  )
+}
+
+# 4. Procesar todas las comparaciones
+resultados_combinados <- map2_df(comparaciones, names(comparaciones), procesar_DE_combinado)
+
+# 5. Mostrar resumen estadístico
+print(resultados_combinados)
+
+# 6. Combinar todos los resultados en un solo dataframe
+all_DE_genes <- bind_rows(
+  A_B_vs_A_F_DE,
+  C_B_vs_C_F_DE,
+  A_F_vs_C_F_DE,
+  A_B_vs_C_B_DE
+)
+
+# 7. Visualizar resultados combinados
+View(all_DE_genes)
+
+
+```
+#Mostrar genes involucrados en senecencia pero que no sean relacionados a la sintesis ni transducción del etileno
+```{r}
+# List of target genes related to floral senescence in Gypsophila paniculata
+target_genes <- c("Gpan01g00371", "Gpan01g01321", "Gpan01g01319", 
+                 "Gpan01g01389", "Gpan07g00598", "Gpan05g00038")
+
+# Filter the all_DE_genes table for these specific genes
+senescence_genes <- all_DE_genes %>%
+  filter(geneID %in% target_genes) %>%
+  arrange(desc(abs(log2FoldChange)))  # Sort by absolute fold change (most dramatic changes first)
+
+# View the results
+View(senescence_genes)
+```
+# 1. Combinar todos los resultados en un solo dataframe con una columna de Comparación
+
+```{r}
+all_results <- bind_rows(
+  Res_A_B_vs_A_F %>% mutate(Comparacion = "A_B_vs_A_F"),
+  Res_C_B_vs_C_F %>% mutate(Comparacion = "C_B_vs_C_F"),
+  Res_A_F_vs_C_F %>% mutate(Comparacion = "A_F_vs_C_F"),
+  Res_A_B_vs_C_B %>% mutate(Comparacion = "A_B_vs_C_B")
+)
+```
+
+# 2. Crear tabla resumen estadística
+
+```{r}
+summary_table <- all_results %>%
+  group_by(Comparacion, Result) %>%
+  summarise(
+    Conteo = n(),
+    Media_log2FC = round(mean(log2FoldChange), 2),
+    SD_log2FC = round(sd(log2FoldChange), 2),
+    .groups = 'drop'
+  ) %>%
+  mutate(Result = factor(Result, levels = c("Up Regulated", "Down Regulated", "Not Significative", "Not Altered")))
+```
+# 3. Gráfico de barras para visualizar los conteos por comparación
+
+```{r}
+p1 <- ggplot(summary_table, aes(x = Comparacion, y = Conteo, fill = Result)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = Conteo), position = position_dodge(width = 0.9), vjust = -0.5) +
+  scale_fill_manual(values = c("Up Regulated" = "#1b9e77", 
+                              "Down Regulated" = "#d95f02",
+                              "Not Significative" = "#7570b3",
+                              "Not Altered" = "#e6ab02")) +
+  labs(title = "Conteo de genes diferencialmente expresados",
+       x = "Comparación",
+       y = "Número de genes",
+       fill = "Regulación") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plot(p1)
+```
+
+#Cambiar a una columna los nombres de los genes
+
+```{r}
+ResS_A_B_vs_A_F <- Res_A_B_vs_A_F %>% 
+  rownames_to_column(var = "geneID")
+
+ResS_C_B_vs_C_F <- Res_C_B_vs_C_F %>% 
+  rownames_to_column(var = "geneID")
+
+ResS_A_B_vs_C_B <- Res_A_B_vs_C_B %>% 
+  rownames_to_column(var = "geneID")
+
+ResS_A_F_vs_C_F <- Res_A_F_vs_C_F %>% 
+  rownames_to_column(var = "geneID")
+```
+
+#Enlistar genes de síntesis de etileno
+
+```{r}
+genes_etileno <- c("Gpan09g00521", "Gpan07g00991", "Gpan07g00441", "Gpan14g00992", "Gpan16g00140", "Gpan14g00933", "Gpan00g00070", "Gpan13g00261", "Gpan16g0l117", "Gpan05g01479", "Gpan04g00338", "Gpan01g00730", "Gpan07g00655", "Gpan05g00271", "Gpan17g01249", "Gpan16g01268", "Gpan01g00737", "Gpan06g00916", "Gpan07g00659")
+
+
+```
+
+#Buscar en cada comparación
+
+```{r}
+ResS_A_B_vs_A_F %>%
+  filter(geneID %in% genes_etileno) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResS_C_B_vs_C_F %>%
+  filter(geneID %in% genes_etileno) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResS_A_B_vs_C_B %>%
+  filter(geneID %in% genes_etileno) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResS_A_F_vs_C_F %>%
+  filter(geneID %in% genes_etileno) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+```
+
+# Función para extraer los datos de cada comparación
+```{r}
+extraer_datos <- function(comparacion, nombre_comparacion) {
+  df <- comparacion %>%
+    filter(geneID %in% genes_etileno) %>%
+    select(geneID, log2FoldChange) %>%
+    distinct(geneID, .keep_all = TRUE)
+colnames(df)[colnames(df) == "log2FoldChange"] <- nombre_comparacion
+  return(df)
+}
+```
+# Extraer datos de cada comparación 
+```{r}
+datos_AB_AF <- extraer_datos(ResS_A_B_vs_A_F, "A_B_vs_A_F")
+datos_CB_CF <- extraer_datos(ResS_C_B_vs_C_F, "C_B_vs_C_F")
+datos_AB_CB <- extraer_datos(ResS_A_B_vs_C_B, "A_B_vs_C_B")
+datos_AF_CF <- extraer_datos(ResS_A_F_vs_C_F, "A_F_vs_C_F")
+```
+# Combinar todos los datos en un solo dataframe
+```{r}
+datos_completos <- list(datos_AB_AF, datos_CB_CF, datos_AB_CB, datos_AF_CF) %>%
+  reduce(full_join, by = "geneID")
+```
+# Convertir a matriz para el heatmap
+```{r}
+matriz_heatmap <- datos_completos %>%
+  column_to_rownames("geneID") %>%
+  as.matrix()
+```
+# Crear el heatmap
+```{r}
+pheatmap(matriz_heatmap,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         scale = "none",
+         main = "Genes de síntesis de etileno - log2FoldChange",
+         fontsize_row = 10,
+         fontsize_col = 10,
+         angle_col = 45,
+         display_numbers = TRUE,  # Muestra los valores en las celdas
+         number_color = "black",
+         number_format = "%.2f",  # Formato de 2 decimales
+         cellwidth = 80,         # Ancho de celdas
+         cellheight = 20,         # Alto de celdas
+         border_color = "gray")   # Color del borde
+```
+#-------------------------------------------------
+#Cambiar a una columna los nombres de los genes
+
+```{r}
+ResT_A_B_vs_A_F <- Res_A_B_vs_A_F %>% 
+  rownames_to_column(var = "geneID")
+
+ResT_C_B_vs_C_F <- Res_C_B_vs_C_F %>% 
+  rownames_to_column(var = "geneID")
+
+ResT_A_B_vs_C_B <- Res_A_B_vs_C_B %>% 
+  rownames_to_column(var = "geneID")
+
+ResT_A_F_vs_C_F <- Res_A_F_vs_C_F %>% 
+  rownames_to_column(var = "geneID")
+
+```
+#Enlistar genes de señal de transdución de etileno
+```{r}
+genes_senal <- c("Gpan16g00856", "Gpan08g00676", "Gpan10g00425", "Gpan02g00562", "Gpan08g00237", "Gpan14g00583", "Gpan16g00118", "Gpan15g00017", "Gpan03g00854", "Gpan03g00873", "Gpan11g00866", "Gpan08g00815", "Gpan04g01184", "Gpan14g00950", "Gpan13g01436", "Gpan05g01604", "Gpan14g00589", "Gpan14g00588", "Gpan15g01039", "Gpan03g00180", "Gpan09g01519", "Gpan05g00114", "Gpan14g00881", "Gpan11g00477", "Gpan15g00066", "Gpan13g00281", "Gpan14g00949", "Gpan06g00755", "Gpan10g00460", "Gpan08g00166", "Gpan13g00283", "Gpan16g00202", "Gpan02g00900", "Gpan07g00588", "Gpan11g00119", "Gpan16g00847", "Gpan12g00793", "Gpan10g01008", "Gpan08g0l708", "Gpan13g00217", "Gpan17g00803", "Gpan10g00832", "Gpan14g01509", "Gpan15g00618", "Gpan08g01336", "Gpan08g00796", "Gpan04g00666", "Gpan04g00592", "Gpan07g00591", "Gpan04g00597", "Gpan07g00572", "Gpan10g00915", "Gpan11g00448", "Gpan15g00980", "Gpan03g0147S")
+```
+
+#Buscar en cada comparación
+
+```{r}
+ResT_A_B_vs_A_F %>%
+  filter(geneID %in% genes_senal) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResT_C_B_vs_C_F %>%
+  filter(geneID %in% genes_senal) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResT_A_B_vs_C_B %>%
+  filter(geneID %in% genes_senal) %>%
+  select(geneID, log2FoldChange, padj, Result)
+
+ResT_A_F_vs_C_F %>%
+  filter(geneID %in% genes_senal) %>%
+  select(geneID, log2FoldChange, padj, Result)
+```
+# Función para extraer los datos de cada comparación
+```{r}
+extraer_datos <- function(comparacion, nombre_comparacion) {
+  df <- comparacion %>%
+    filter(geneID %in% genes_senal) %>%
+    select(geneID, log2FoldChange) %>%
+    distinct(geneID, .keep_all = TRUE)
+colnames(df)[colnames(df) == "log2FoldChange"] <- nombre_comparacion
+  return(df)
+}
+```
+# Extraer datos de cada comparación 
+```{r}
+datosT_AB_AF <- extraer_datos(ResT_A_B_vs_A_F, "A_B_vs_A_F")
+datosT_CB_CF <- extraer_datos(ResT_C_B_vs_C_F, "C_B_vs_C_F")
+datosT_AB_CB <- extraer_datos(ResT_A_B_vs_C_B, "A_B_vs_C_B")
+datosT_AF_CF <- extraer_datos(ResT_A_F_vs_C_F, "A_F_vs_C_F")
+```
+# Combinar todos los datos en un solo dataframe
+```{r}
+datos_completosT <- list(datosT_AB_AF, datosT_CB_CF, datosT_AB_CB, datosT_AF_CF) %>%
+  reduce(full_join, by = "geneID")
+```
+# Convertir a matriz para el heatmap
+```{r}
+matriz_heatmapT <- datos_completosT %>%
+  column_to_rownames("geneID") %>%
+  as.matrix()
+```
+# Crear el heatmap
+```{r}
+pheatmap(matriz_heatmapT,
+         color = colorRampPalette(c("blue", "white", "red"))(70),
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         scale = "none",
+         main = "Genes de señal de transducción etileno - log2FoldChange",
+         fontsize_row = 8,
+         fontsize_col = 10,
+         angle_col = 45,
+         display_numbers = TRUE,  # Muestra los valores en las celdas
+         number_color = "black",
+         number_format = "%.2f",  # Formato de 2 decimales
+         cellwidth = 30,         # Ancho de celdas
+         cellheight = 12,         # Alto de celdas
+         border_color = "gray")   # Color del borde
+```
+
+
+
+
